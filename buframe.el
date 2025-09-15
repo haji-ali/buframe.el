@@ -518,29 +518,5 @@ BUFFER can be:
          (buframe--auto* frame fn buffer)))
      (frame-list))))
 
-
-;; TODO: This is a function that can forward events. it doesn't currently
-;; fully work for mouse-wheel events. WIP
-(defun buframe--forward-event (event)
-  "Forward EVENT from child to parent buffer."
-  (interactive "e")
-  (when-let* ((frame (window-frame (posn-window (event-start event))))
-              (buffer-info (frame-parameter frame 'buframe)))
-    (let* ((parent (frame-parameter frame 'parent-frame))
-           (parent-buffer (plist-get buffer-info :parent-buffer))
-           (win (get-buffer-window parent-buffer)))
-      (with-selected-frame parent
-        (with-selected-window win
-          (with-current-buffer parent-buffer
-            (let* ((key (car event))
-                   (cmd (key-binding (vector key) t))
-                   (new (append (list key (list win))
-                                (cl-subseq event 2))))
-              (when cmd
-                (let ((last-input-event new)
-                      (last-command-event key)
-                      (this-command cmd))
-                  (call-interactively cmd))))))))))
-
 (provide 'buframe)
 ;;; buframe.el ends here
