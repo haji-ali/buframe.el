@@ -29,10 +29,20 @@ Or manually clone and place in your `load-path`.
 Example creating a child frame next to an overlay:
 
 ```
-(let ((ov (make-overlay (point) (1+ (point)))))
+(eval
+ '(let ((ov (make-overlay (point) (1+ (point))))
+        (buf (buframe-make-buffer "preview")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (propertize "HELLO WORLD\nThis is an illustration of buframe."
+                            'face
+                            'highlight))))
     (buframe-make "preview"
-        (lambda (frame) (buframe-position-right-of-overlay frame ov))
-        (buframe-make-buffer "preview")))
+                  (lambda (frame)
+                    (buframe-position-right-of-overlay frame ov))
+                  buf))
+ t) ;; This is a test
 ```
 
 Frames will automatically update/hide as the buffer is selected/deselected.
