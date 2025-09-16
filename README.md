@@ -5,6 +5,8 @@ associated with individual buffers. These frames are meant for inline previews,
 annotations, completions, or other UI elements that should not interfere with
 normal Emacs focus or window behaviour.
 
+![buframe](buframe.gif)
+
 ## Features
 
 - Buffer-local child frames
@@ -28,7 +30,7 @@ Or manually clone and place in your `load-path`.
 
 Example creating a child frame next to an overlay:
 
-```
+```emacs-lisp
 (eval
  '(let ((ov (make-overlay (point) (1+ (point))))
         (buf (buframe-make-buffer "preview")))
