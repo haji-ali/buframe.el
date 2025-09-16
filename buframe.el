@@ -5,7 +5,7 @@
 ;; Author: Al Haji-Ali <abdo.haji.ali@gmail.com>
 ;; URL: https://github.com/haji-ali/buframe
 ;; Version: 0.1
-;; Package-Requires: ((emacs "27.1"))
+;; Package-Requires: ((emacs "27.1") (timeout ("2.1")))
 ;; Keywords: buffer, frames, convenience
 ;;
 ;; This program is free software; you can redistribute it and/or modify
@@ -38,6 +38,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'timeout)
 
 (defvar buframe--default-buf-parameters
   '((mode-line-format . nil)
@@ -95,7 +96,7 @@
         (define-key map (kbd (format "<%s-%s>" k (1+ i))) #'ignore)))
     (when (boundp 'mouse-wheel--installed-bindings-alist)
       (pcase-dolist
-          (`(key . fun) mouse-wheel--installed-bindings-alist)
+          (`(,key . ,fun) mouse-wheel--installed-bindings-alist)
         ;; TODO.
         ;; (define-key map key #'buframe--forward-event)
         (define-key map key #'ignore)))
@@ -167,12 +168,10 @@ Tries LOCATION first, then fallbacks.  Skips if frame would overlap point."
                 (setq x (+ (nth 0 bbox))
                       y (+ (nth 1 bbox) (nth 3 bbox)))))
 	     ;; if you are loading cl-lib, you can use cl-incf here as well:
-             (setq x (+ x
-                        (if (eq loc 'middle) (default-font-width) 0))
-                   y (+ y
-                        (or (frame-parameter frame 'tab-line-height) 0)
-                        (or (frame-parameter frame 'header-line-height) 0)
-                        (or (and (eq loc 'middle) (- (/ fh 2))) 0)))
+             (cl-incf x (if (eq loc 'middle) (default-font-width) 0))
+             (cl-incf y (+ (or (frame-parameter frame 'tab-line-height) 0)
+                           (or (frame-parameter frame 'header-line-height) 0)
+                           (or (and (eq loc 'middle) (- (/ fh 2))) 0)))
              (let* (;;; To clamp to parent frame
                     ;; (px 0) (py 0)
                     ;;(cw (frame-pixel-width parent))
@@ -378,7 +377,7 @@ Also ensure frame is made visible."
               (unless (frame-visible-p frame)
                 (make-frame-visible frame)
                 (add-hook 'post-command-hook 'buframe-autohide)
-                (add-hook 'post-command-hook 'buframe-post-command nil t)))
+                (add-hook 'post-command-hook 'buframe-autoupdate--debounced nil t)))
           (buframe-hide frame))))))
 
 (defun buframe-disabled-p (frame-or-name)
@@ -416,85 +415,17 @@ If ENABLE is non-nil, re-enable and show it."
        (frame-list))
     (remove-hook 'post-command-hook 'buframe-autohide)))
 
-(defmacro buframe--defun-debounced (name arglist &rest body)
-  "Define a debounced function NAME.
-
-The macro adds a DEBOUNCE argument to control denouncing.  Pass :debounce
-SEC to a schedule a call after SEC seconds, nil to execute the actual
-logic.  ARGLIST is the argument specification and it follows the
-`cl-defun' conventions.  BODY is the function including documentations
-and standard declarations."
-  (declare (doc-string 3) (indent defun))
-  (let* ((timer-var (intern (format "%s--debounce-timer" name)))
-         (parsed (macroexp-parse-body body))
-         (doc-decl (car parsed))        ;; docstring + declarations
-         (body-forms (cdr parsed))
-         (real-args
-          ;; Add the debounce argument at the right position.
-          (let ((args arglist) (todo t) real-args)
-            (while args
-              (let ((arg (car args)))
-                (when (and todo (eq arg '&aux))
-                  (push '&key real-args)
-                  (push 'debounce real-args)
-                  (setq todo nil))
-                (push arg real-args)
-                (when (and todo (eq arg '&key))
-                  (push 'debounce real-args)
-                  (setq todo nil)))
-              (setq args (cdr args)))
-            (when todo
-              (push '&key real-args)
-              (push 'debounce real-args))
-            (nreverse real-args)))
-         (debounce-doc
-          (format
-           "When called with DEBOUNCE, schedule execution after DEBOUNCE
- seconds, otherwise execute the function body.
-
-\%S" (append '(fn) real-args))))
-    ;; Augment docstring
-    (if (stringp (car doc-decl))
-        (setcar doc-decl (concat (car doc-decl) "\n\n" debounce-doc))
-      (if doc-decl
-          (setcar doc-decl debounce-doc)
-        (setq doc-decl (list debounce-doc))))
-    `(progn
-       (defvar ,timer-var nil)
-       (cl-defun ,name (&rest args)
-         ,@doc-decl
-         (when ,timer-var
-           (cancel-timer ,timer-var)
-           (setq ,timer-var nil))
-         (let (debounce)
-           (setq args
-                 (let (positional)
-                   (while args
-                     (let ((x (pop args)))
-                       (if (eq x :debounce)
-                           (setq debounce (pop args))
-                         (push x positional))))
-                   (nreverse positional)))
-           (if (and debounce (> debounce 0))
-               ;; schedule idle call
-               (setq ,timer-var
-                     (apply #'run-with-idle-timer
-                            debounce nil #',name
-                            args))
-             (apply (lambda (,@arglist) ,@body-forms) args)))))))
-
 (defun buframe-autohide (&optional frame-or-name)
   "Hide FRAME-OR-NAME if its parent buffer is not selected."
   (buframe--auto* frame-or-name 'buframe-hide 'not-parent))
 
-(defun buframe-post-command ()
-  "Update all buframes frames."
-  (buframe-autoupdate :debounce buframe-update-debounce-delay))
-
-(buframe--defun-debounced
-  buframe-autoupdate (&optional frame-or-name)
+(defun buframe-autoupdate (&optional frame-or-name)
   "Update FRAME-OR-NAME if its parent buffer is currently selected."
   (buframe--auto* frame-or-name 'buframe-update 'parent))
+
+(defalias 'buframe-autoupdate--debounced (timeout-debounced-func
+                                          'buframe-autoupdate
+                                          'buframe-update-debounce-delay))
 
 (defun buframe--auto* (frame-or-name fn buffer)
   "Run FN on FRAME-OR-NAME based on BUFFER selection rules.
