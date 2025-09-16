@@ -22,6 +22,7 @@
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
+
 ;; Buframe provides utilities to create, manage, and update local child
 ;; frames, associated with a single buffer, for previews or inline overlays.
 ;; By default, these child frames are:
@@ -34,9 +35,10 @@
 ;; previews, completions, or inline annotations, without interfering
 ;; with normal Emacs windows or focus behaviour
 
+;;; Code:
+
 (require 'cl-lib)
 
-;;; Code:
 (defvar buframe--default-buf-parameters
   '((mode-line-format . nil)
     (header-line-format . nil)
@@ -92,11 +94,11 @@
       (dolist (k '(mouse down-mouse drag-mouse double-mouse triple-mouse))
         (define-key map (kbd (format "<%s-%s>" k (1+ i))) #'ignore)))
     (when (boundp 'mouse-wheel--installed-bindings-alist)
-      (cl-loop for (key . fun) in mouse-wheel--installed-bindings-alist
-               do
-               ;; TODO.
-               ;; (define-key map key #'buframe--forward-event)
-               (define-key map key #'ignore)))
+      (pcase-dolist
+          (`(key . fun) mouse-wheel--installed-bindings-alist)
+        ;; TODO.
+        ;; (define-key map key #'buframe--forward-event)
+        (define-key map key #'ignore)))
     map)
   "Ignore all mouse clicks.")
 
@@ -164,6 +166,7 @@ Tries LOCATION first, then fallbacks.  Skips if frame would overlap point."
                ('bottom
                 (setq x (+ (nth 0 bbox))
                       y (+ (nth 1 bbox) (nth 3 bbox)))))
+	     ;; if you are loading cl-lib, you can use cl-incf here as well:
              (setq x (+ x
                         (if (eq loc 'middle) (default-font-width) 0))
                    y (+ y
@@ -206,14 +209,13 @@ Tries LOCATION first, then fallbacks.  Skips if frame would overlap point."
             best-pos best-overlap)
         (catch 'done
           (dolist (loc order)
-            (let ((pos (calc loc)))
-              (when pos
-                (let ((ov (overlap-area pos)))
-                  (when (eq ov 0)
-                    (throw 'done pos))
-                  (when (or (null best-overlap) (< ov best-overlap))
-                    (setq best-pos pos
-                          best-overlap ov))))))
+            (when-let* ((pos (calc loc)))
+              (let ((ov (overlap-area pos)))
+                (when (eq ov 0)
+                  (throw 'done pos))
+                (when (or (null best-overlap) (< ov best-overlap))
+                  (setq best-pos pos
+                        best-overlap ov)))))
           best-pos)))))
 
 ;;;###autoload
@@ -228,8 +230,8 @@ creation in addition to `buframe--default-buf-parameters'."
       ;;; XXX HACK from corfu install mouse ignore map
       (use-local-map buframe--frame-mouse-ignore-map)
       (dolist (vars (list buframe--default-buf-parameters locals))
-        (dolist (var vars)
-          (set (make-local-variable (car var)) (cdr var))))
+        (pcase-dolist (`(,sym . ,val) vars)
+          (set (make-local-variable sym) val)))
       (setq-local face-remapping-alist (copy-tree fr)
                   line-spacing ls)
       buffer)))
@@ -387,24 +389,24 @@ Also ensure frame is made visible."
 (defun buframe-disable (frame-or-name &optional enable)
   "Disable and hide FRAME-OR-NAME.
 If ENABLE is non-nil, re-enable and show it."
-  (when-let* ((frm (buframe--find frame-or-name)))
-    (when (frame-live-p frm)
-      (set-frame-parameter
-       frm 'buframe
-       (plist-put
-        (frame-parameter frm 'buframe)
-        :disabled
-        (not enable)))
-      (if enable
-          (buframe-update frm)
-        (buframe-hide frm)))))
+  (when-let* ((frm (buframe--find frame-or-name))
+	      ((frame-live-p frm)))
+    (set-frame-parameter
+     frm 'buframe
+     (plist-put
+      (frame-parameter frm 'buframe)
+      :disabled
+      (not enable)))
+    (if enable
+        (buframe-update frm)
+      (buframe-hide frm))))
 
 (defun buframe-hide (frame-or-name)
   "Make FRAME-OR-NAME invisible."
-  (when-let* ((frm (buframe--find frame-or-name)))
-    (when (and (frame-live-p frm)
-               (frame-visible-p frm))
-      (make-frame-invisible frm)))
+  (when-let* ((frm (buframe--find frame-or-name))
+	      ((and (frame-live-p frm)
+		    (frame-visible-p frm))))
+    (make-frame-invisible frm))
   (unless
       (cl-find-if
        (lambda (frame)
@@ -512,11 +514,9 @@ BUFFER can be:
                     (eq (window-buffer) buffer))
             ;; If buffer is not selected, we should hide the frame
             (funcall fn frame))))
-    (cl-mapc
-     (lambda (frame)
-       (when-let* ((buffer-info (frame-parameter frame 'buframe)))
-         (buframe--auto* frame fn buffer)))
-     (frame-list))))
+    (dolist (frame (frame-list))
+      (when-let* ((buffer-info (frame-parameter frame 'buframe)))
+        (buframe--auto* frame fn buffer)))))
 
 (provide 'buframe)
 ;;; buframe.el ends here
