@@ -1,11 +1,11 @@
 ;;; buframe.el --- Buffer-local frames  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2025 Al Haji-Ali
+;; Copyright (C) 2025 Free Software Foundation, Inc.
 
 ;; Author: Al Haji-Ali <abdo.haji.ali@gmail.com>
 ;; URL: https://github.com/haji-ali/buframe
-;; Version: 0.1
-;; Package-Requires: ((emacs "27.1") (timeout ("2.1")))
+;; Version: 0.2
+;; Package-Requires: ((emacs "27.1") (timeout "2.1"))
 ;; Keywords: buffer, frames, convenience
 ;;
 ;; This program is free software; you can redistribute it and/or modify
