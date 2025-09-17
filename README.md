@@ -19,12 +19,7 @@ normal Emacs focus or window behaviour.
 
 ## Installation
 
-```emacs-lisp
-(use-package buframe
-:straight (buframe :type git :host github :repo "haji-ali/buframe"))
-```
-
-Or manually clone and place in your `load-path`.
+`buframe` is available from GNU ELPA. You can install it directly via `M-x package-install RET buframe RET`.
 
 ## Usage
 
