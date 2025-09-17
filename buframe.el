@@ -97,9 +97,11 @@
     (when (boundp 'mouse-wheel--installed-bindings-alist)
       (pcase-dolist
           (`(,key . ,fun) mouse-wheel--installed-bindings-alist)
-        ;; TODO.
-        ;; (define-key map key #'buframe--forward-event)
-        (define-key map key #'ignore)))
+        (define-key map key (lambda (ev)
+                              (interactive "e")
+                              (buframe--forward-event ev key)))
+        ;; (define-key map key #'ignore)
+        ))
     map)
   "Ignore all mouse clicks.")
 
@@ -317,6 +319,7 @@ defaults."
       (setq frame (make-frame
                    `((name . ,frame-or-name)
                      (parent-frame . ,parent-frame)
+                     (mouse-wheel-frame . ,parent-frame)
                      (minibuffer . nil)
                      ;; (minibuffer . ,(minibuffer-window parent))
                      (width . 0) (height . 0) (visibility . nil)
@@ -448,6 +451,28 @@ BUFFER can be:
     (dolist (frame (frame-list))
       (when-let* ((buffer-info (frame-parameter frame 'buframe)))
         (buframe--auto* frame fn buffer)))))
+
+;; TODO: This is a function that can forward events. it doesn't currently
+;; fully work for mouse-wheel events. WIP
+(defun buframe--forward-event (event &optional key)
+  "Forward EVENT from child to parent buffer."
+  (interactive "e")
+  (when-let* ((frame (window-frame (posn-window (event-start event))))
+              (buffer-info (frame-parameter frame 'buframe)))
+    (let* ((parent (frame-parameter frame 'parent-frame))
+           (parent-buffer (plist-get buffer-info :parent-buffer))
+           (win (get-buffer-window parent-buffer)))
+      (with-selected-frame parent
+        (with-selected-window win
+          (with-current-buffer parent-buffer
+            (let* ((cmd (key-binding key t))
+                   (new (append (list (car event) (list win))
+                                (cl-subseq event 2))))
+              (when cmd
+                (let ((last-input-event new)
+                      (last-command-event key)
+                      (this-command cmd))
+                  (funcall cmd new))))))))))
 
 (provide 'buframe)
 ;;; buframe.el ends here
