@@ -283,6 +283,7 @@ Optional PARENT-BUFFER and PARENT-FRAME default to the current
 buffer and frame.
 PARAMETERS is an alist of frame parameters overriding the
 defaults."
+  ;; Code is adapted from corfu and posframe
   (let* ((window-min-height 1)
          (window-min-width 1)
          (inhibit-redisplay t)
@@ -356,7 +357,6 @@ defaults."
     ;; top of the Corfu child frame.
     (when (and (bound-and-true-p exwm--connection) (frame-parent frame))
       (set-frame-parameter frame 'parent-frame nil))
-
     frame))
 
 (defun buframe-update (frame-or-name)
