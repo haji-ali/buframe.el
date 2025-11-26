@@ -108,7 +108,7 @@
 Return (LEFT TOP WIDTH HEIGHT) or nil."
   (let* ((rs (max start (window-start window)))
          (re (min end (window-end window t)))
-         (edges (window-inside-pixel-edges window))
+         (edges (window-inside-absolute-pixel-edges window))
          minx miny maxx maxy)
     (when (< rs re)
       (save-excursion
