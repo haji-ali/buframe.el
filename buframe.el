@@ -40,7 +40,7 @@
 (require 'cl-lib)
 (require 'timeout)
 
-(defvar buframe--default-buf-parameters
+(defvar buframe--default-buf-locals
   '((mode-line-format . nil)
     (header-line-format . nil)
     (tab-line-format . nil)
@@ -60,7 +60,7 @@
     (indicate-empty-lines . nil)
     (indicate-buffer-boundaries . nil)
     (buffer-read-only . t))
-  "Default child frame buffer parameters for preview frames.")
+  "Default child frame buffer local variables for buframes.")
 
 (defvar buframe--default-parameters
   '((no-accept-focus . t)
@@ -84,7 +84,7 @@
     (cursor-type . nil)
     (no-special-glyphs . t)
     (desktop-dont-save . t))
-  "Default child frame parameters for preview frames.")
+  "Default child frame parameters for buframes.")
 
 (defvar buframe-update-debounce-delay 0.5
   "Delay in seconds before debounced frame update functions run.")
@@ -96,23 +96,24 @@
         (define-key map (kbd (format "<%s-%s>" k (1+ i))) #'ignore)))
     (when (boundp 'mouse-wheel--installed-bindings-alist)
       (pcase-dolist
-          (`(,key . ,fun) mouse-wheel--installed-bindings-alist)
+          (`(,key . ,_) mouse-wheel--installed-bindings-alist)
         ;; TODO.
         ;; (define-key map key #'buframe--forward-event)
         (define-key map key #'ignore)))
     map)
-  "Ignore all mouse clicks.")
+  "Keymap to ignore all mouse clicks.")
 
 (defun buframe--region-bbox (start end window)
   "Smallest frame-pixel bbox of the VISIBLE part of START..END in WINDOW.
-Return (LEFT TOP WIDTH HEIGHT) or nil."
+Return (LEFT TOP WIDTH HEIGHT) or nil. The returned coordinates
+are relative to the WINDOW's native frames."
   (let* ((rs (max start (window-start window)))
          (re (min end (window-end window t)))
          (edges (window-inside-pixel-edges window))
          minx miny maxx maxy)
     (when (< rs re)
-      (save-excursion
-        (with-current-buffer (window-buffer window)
+      (with-current-buffer (window-buffer window)
+        (save-excursion
           (goto-char rs)
           (while (< (point) re)
             (let* ((bol (point))
@@ -122,16 +123,11 @@ Return (LEFT TOP WIDTH HEIGHT) or nil."
               (when (< seg-start seg-end)
                 (let* ((pos-in-window
 	                (pos-visible-in-window-p seg-start window t))
-                       (abs
-                        (cons (+ (nth 0 edges) (nth 0 pos-in-window))
-	                      (+ (nth 1 edges) (nth 1 pos-in-window))))
-                       (x     (car abs))
-                       (y     (cdr abs))
+                       (x     (+ (nth 0 edges) (nth 0 pos-in-window)))
+                       (y     (+ (nth 1 edges) (nth 1 pos-in-window)))
                        (sz    (window-text-pixel-size window seg-start seg-end))
-                       (w     (car sz))
-                       (h     (cdr sz))
-                       (rx    (+ x w))
-                       (by    (+ y h)))
+                       (rx    (+ x (car sz)))
+                       (by    (+ y (cdr sz))))
                   (setq minx (if minx (min minx x) x)
                         miny (if miny (min miny y) y)
                         maxx (if maxx (max maxx rx) rx)
@@ -142,65 +138,49 @@ Return (LEFT TOP WIDTH HEIGHT) or nil."
 
 (defun buframe-position-right-of-overlay (frame ov &optional location)
   "Return pixel position (X . Y) for FRAME, placed to the right of overlay OV.
-Tries LOCATION first, then fallbacks.  Skips if frame would overlap point."
+LOCATION can be \\='top, \\='bottom or \\='middle and specifies
+the vertical positioning relative to the overlay. Tries LOCATION
+first, then fallbacks to other values such that the frame is not
+off screen. The coordinates is relative to the parent's frame
+origin."
   (when-let* ((buffer (overlay-buffer ov))
               ;; When there are mutliple windows, `get-buffer-window'
               ;; returns the selected window if it showing the buffer.
               (window (get-buffer-window buffer 'visible))
+              (parent (frame-parent frame))
               (bbox (buframe--region-bbox (overlay-start ov)
                                           (overlay-end ov)
                                           window))
-              (parent (frame-parent frame))
               (fw (frame-pixel-width frame))
               (fh (frame-pixel-height frame)))
     (cl-labels
         ((calc (loc)
-           (let ((x 0) y)
-             (pcase loc
-               ('middle
-                ;; middle: horizontal right edge, vertical centre
-                (setq x (+ (nth 0 bbox) (nth 2 bbox))
-                      y (+ (nth 1 bbox) (/ (nth 3 bbox) 2))))
-               ('top
-                (setq x (+ (nth 0 bbox))
-                      y (- (nth 1 bbox) fh)))
-               ('bottom
-                (setq x (+ (nth 0 bbox))
-                      y (+ (nth 1 bbox) (nth 3 bbox)))))
-	     ;; if you are loading cl-lib, you can use cl-incf here as well:
+           (pcase-let* ((`(,x0 ,y0 ,w ,h) bbox)
+                        (`(,x ,y)
+                         (pcase loc
+                           ('middle (list (+ x0 w) (+ y0 (/ h 2))))
+                           ('top    (list x0 (- y0 fh)))
+                           ('bottom (list x0 (+ y0 h))))))
              (cl-incf x (if (eq loc 'middle) (default-font-width) 0))
              (cl-incf y (+ (or (frame-parameter frame 'tab-line-height) 0)
                            (or (frame-parameter frame 'header-line-height) 0)
-                           (or (and (eq loc 'middle) (- (/ fh 2))) 0)))
-             (let* (;;; To clamp to parent frame
-                    ;; (px 0) (py 0)
-                    ;;(cw (frame-pixel-width parent))
-                    ;;(ch (frame-pixel-height parent))
-                    ;; Clamp to screen
-                    (parent-pos (frame-position parent))
-                    (px (+ (car parent-pos) x))
-                    (py (+ (cdr parent-pos) y))
-                    (cw (x-display-pixel-width))
-                    (ch (x-display-pixel-height)))
-               (setq px (max 0 (min px (- cw fw))))
-               (setq py (max 0 (min py (- ch fh))))
-               (cons (max 0 (- px (car parent-pos)))
-                     (max 0 (- py (cdr parent-pos)))))))
+                           (if (eq loc 'middle) (- (/ fh 2)) 0)))
+             (pcase-let* ((`(,px0 . ,py0) (frame-position parent))
+                          (`(,mx ,my ,mw ,mh) (frame-monitor-geometry parent))
+                          (px (min (max (+ px0 x) mx) (+ mx (- mw fw))))
+                          (py (min (max (+ py0 y) my) (+ my (- mh fh)))))
+               (cons (max 0 (- px px0)) (max 0 (- py py0))))))
          (overlap-area (pos)
            (when (and pos bbox)
-             (let* ((ox (nth 0 bbox))
-                    (oy (nth 1 bbox))
-                    (ow (nth 2 bbox))
-                    (oh (nth 3 bbox))
-                    ;; frame rectangle
-                    (rx (car pos)) (ry (cdr pos))
-                    (rx2 (+ rx fw)) (by2 (+ ry fh))
-                    (rx-ov (+ ox ow)) (by-ov (+ oy oh))
-                    (lx (max rx ox)) (ty (max ry oy))
-                    (rx-int (min rx2 rx-ov)) (by-int (min by2 by-ov)))
-               (if (or (<= rx-int lx) (<= by-int ty))
+             (pcase-let* ((`(,ox ,oy ,ow ,oh) bbox)
+                          (`(,rx . ,ry) pos)
+                          (ix (max rx ox))
+                          (iy (max ry oy))
+                          (ix2 (min (+ rx fw) (+ ox ow)))
+                          (iy2 (min (+ ry fh) (+ oy oh))))
+               (if (or (<= ix2 ix) (<= iy2 iy))
                    0
-                 (* (- rx-int lx) (- by-int ty)))))))
+                 (* (- ix2 ix) (- iy2 iy)))))))
       (let ((order (pcase (or location 'middle)
                      ('top    '(top middle bottom))
                      ('bottom '(bottom middle top))
@@ -219,23 +199,23 @@ Tries LOCATION first, then fallbacks.  Skips if frame would overlap point."
 
 ;;;###autoload
 (defun buframe-make-buffer (name &optional locals)
-  "Return a buffer with NAME configured for preview frames.
+  "Return a buffer with NAME configured for buframes.
 LOCALS are local variables which are set in the buffer after
-creation in addition to `buframe--default-buf-parameters'."
+creation in addition to `buframe--default-buf-locals'."
   (let ((fr face-remapping-alist)
         (ls line-spacing)
         (buffer (get-buffer-create name)))
     (with-current-buffer buffer
       ;;; XXX HACK from corfu install mouse ignore map
       (use-local-map buframe--frame-mouse-ignore-map)
-      (dolist (vars (list buframe--default-buf-parameters locals))
+      (dolist (vars (list buframe--default-buf-locals locals))
         (pcase-dolist (`(,sym . ,val) vars)
           (set (make-local-variable sym) val)))
       (setq-local face-remapping-alist (copy-tree fr)
                   line-spacing ls)
       buffer)))
 
-(defun buframe--find (&optional frame-or-name buffer parent noerror)
+(defun buframe-find (&optional frame-or-name buffer parent noerror)
   "Return frame displaying BUFFER with PARENT.
 FRAME-OR-NAME can be a frame object or name.
 If BUFFER is non-nil, restrict search to that buffer.
@@ -268,21 +248,19 @@ If NOERROR is nil and no frame is found, signal an error."
                         (parent-buffer (window-buffer))
                         (parent-frame (window-frame))
                         parameters)
-  "Create or reuse a child FRAME displaying BUFFER, positioned using FN-POS.
+  "Create or reuse a child frame displaying BUFFER, positioned using FN-POS.
 
 By default, the frame is configured to be minimal, dedicated,
-non-focusable, and properly sized to its buffer.  Positioning is
-delegated to FN-POS.  If an existing child frame matching FRAME-OR-NAME
-and BUFFER exists, it is reused; otherwise, a new one is created.
+non-focusable, and properly sized to its buffer. If an existing
+child frame matching FRAME-OR-NAME and BUFFER exists, it is
+reused; otherwise, a new one is created.
 
-FRAME-OR-NAME is either the frame to reuse or its name.
-FN-POS is a function called with the frame and overlay/position,
-returning (X . Y).
-BUFFER is the buffer to display in the child frame.
-Optional PARENT-BUFFER and PARENT-FRAME default to the current
-buffer and frame.
-PARAMETERS is an alist of frame parameters overriding the
-defaults."
+FRAME-OR-NAME is either the frame to reuse or its name. FN-POS is
+a function called with the frame, returning (X . Y) which is used
+to position the frame using `set-frame-position'. BUFFER is the
+buffer to display in the child frame. Optional PARENT-BUFFER and
+PARENT-FRAME default to the current buffer and frame. PARAMETERS
+is an alist of frame parameters overriding the defaults."
   ;; Code is adapted from corfu and posframe
   (let* ((window-min-height 1)
          (window-min-width 1)
@@ -291,7 +269,7 @@ defaults."
          ;; (x-gtk-resize-child-frames corfu--gtk-resize-child-frames)
          (before-make-frame-hook)
          (after-make-frame-functions)
-         (frame (buframe--find frame-or-name buffer nil t))
+         (frame (buframe-find frame-or-name buffer nil t))
          (frm-params (cl-copy-list buframe--default-parameters)))
     (dolist (pair parameters frm-params)
       (setf (alist-get (car pair) frm-params nil t #'equal) (cdr pair)))
@@ -362,12 +340,19 @@ defaults."
 (defun buframe-update (frame-or-name)
   "Reposition and show FRAME-OR-NAME using its stored positioning function.
 Also ensure frame is made visible."
-  (let* ((frame (buframe--find frame-or-name))
+  (let* ((frame (buframe-find frame-or-name))
          (info (frame-parameter frame-or-name 'buframe))
          (fn-pos (plist-get info :fn-pos)))
     (when (and frame
                (frame-live-p frame)
                (not (buframe-disabled-p frame)))
+      ;; Change parent frame to one showing buffer
+      (when-let* ((buffer (plist-get info :parent-buffer))
+                  ((buffer-live-p buffer))
+                  (new-parent (window-frame (get-buffer-window buffer 'visible)))
+                  ((not (eq (frame-parent frame) new-parent))))
+        (set-frame-parameter frame 'parent-frame new-parent))
+
       (with-current-buffer (plist-get info :parent-buffer)
         (if-let* ((pos (funcall fn-pos frame)))
             (pcase-let ((`(,px . ,py) (frame-position frame))
@@ -382,13 +367,13 @@ Also ensure frame is made visible."
 
 (defun buframe-disabled-p (frame-or-name)
   "Return non-nil if FRAME-OR-NAME is disabled."
-  (let ((frm (buframe--find frame-or-name)))
+  (let ((frm (buframe-find frame-or-name)))
     (plist-get (frame-parameter frm 'buframe) :disabled)))
 
 (defun buframe-disable (frame-or-name &optional enable)
   "Disable and hide FRAME-OR-NAME.
 If ENABLE is non-nil, re-enable and show it."
-  (when-let* ((frm (buframe--find frame-or-name))
+  (when-let* ((frm (buframe-find frame-or-name))
 	      ((frame-live-p frm)))
     (set-frame-parameter
      frm 'buframe
@@ -402,7 +387,7 @@ If ENABLE is non-nil, re-enable and show it."
 
 (defun buframe-hide (frame-or-name)
   "Make FRAME-OR-NAME invisible."
-  (when-let* ((frm (buframe--find frame-or-name))
+  (when-let* ((frm (buframe-find frame-or-name))
 	      ((and (frame-live-p frm)
 		    (frame-visible-p frm))))
     (make-frame-invisible frm))
@@ -436,7 +421,7 @@ BUFFER can be:
   \\='not-parent  – run only if parent buffer is not current
   a buffer     – run only if BUFFER is current."
   (if frame-or-name
-      (when-let* ((frame (buframe--find frame-or-name)))
+      (when-let* ((frame (buframe-find frame-or-name)))
         (let ((is-parent (eq (window-buffer)
                              (plist-get (frame-parameter frame 'buframe)
                                         :parent-buffer))))
@@ -448,6 +433,8 @@ BUFFER can be:
     (dolist (frame (frame-list))
       (when-let* ((buffer-info (frame-parameter frame 'buframe)))
         (buframe--auto* frame fn buffer)))))
+
+(define-obsolete-function-alias 'buframe--find #'buframe-find "0.3")
 
 (provide 'buframe)
 ;;; buframe.el ends here
