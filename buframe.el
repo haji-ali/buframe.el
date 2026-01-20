@@ -4,7 +4,7 @@
 
 ;; Author: Al Haji-Ali <abdo.haji.ali@gmail.com>
 ;; URL: https://github.com/haji-ali/buframe
-;; Version: 0.2
+;; Version: 0.3
 ;; Package-Requires: ((emacs "27.1") (timeout "2.1"))
 ;; Keywords: buffer, frames, convenience
 ;;
