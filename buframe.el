@@ -351,7 +351,8 @@ Also ensure frame is made visible."
                   ((buffer-live-p buffer))
                   (new-parent (window-frame (get-buffer-window buffer 'visible)))
                   ((not (eq (frame-parent frame) new-parent))))
-        (set-frame-parameter frame 'parent-frame new-parent))
+        (set-frame-parameter frame 'parent-frame new-parent)
+        (redirect-frame-focus frame new-parent))
 
       (with-current-buffer (plist-get info :parent-buffer)
         (if-let* ((pos (funcall fn-pos frame)))
